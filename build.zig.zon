@@ -1,0 +1,17 @@
+.{
+    .name = .expat,
+    .fingerprint = 0x460400c00d1b8c8d,
+    .version = "2.7.3",
+    .minimum_zig_version = "0.14.0",
+    .dependencies = .{
+        .expat = .{
+            .url = "git+https://github.com/libexpat/libexpat?ref=R_2_7_3#4575e52f83e0d6d7bd24939eab8952bbc7bc358f",
+            .hash = "N-V-__8AAIzFHAhPjEWBZ2Sbh9BdX5dM4nbVGxTOcRPL-iGs",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
