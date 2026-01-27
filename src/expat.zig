@@ -104,6 +104,8 @@ fn toStatus(s: c.XML_Status) Status {
     };
 }
 
+pub const StatelessParser = Parser(void);
+
 /// XML Parser with optional userdata. Pass `void` if you don't need it.
 pub fn Parser(comptime UserData: type) type {
     return struct {
@@ -121,32 +123,57 @@ pub fn Parser(comptime UserData: type) type {
         pub const ProcessingInstructionFn = if (has_userdata) fn (Ud, [:0]const u8, [:0]const u8) void else fn ([:0]const u8, [:0]const u8) void;
         pub const DefaultFn = if (has_userdata) fn (Ud, []const u8) void else fn ([]const u8) void;
 
-        inline fn ud(raw_ud: ?*anyopaque) Ud {
-            return if (has_userdata) @ptrCast(@alignCast(raw_ud)) else {};
-        }
+        pub const init = if (has_userdata)
+            struct {
+                fn f(encoding: ?[*:0]const u8, user_data: Ud) ?Self {
+                    const p = c.XML_ParserCreate(encoding) orelse return null;
+                    c.XML_SetUserData(p, user_data);
+                    return .{ .raw = p };
+                }
+            }.f
+        else
+            struct {
+                fn f(encoding: ?[*:0]const u8) ?Self {
+                    const p = c.XML_ParserCreate(encoding) orelse return null;
+                    return .{ .raw = p };
+                }
+            }.f;
 
-        pub fn init(encoding: ?[*:0]const u8, user_data: Ud) ?Self {
-            const p = c.XML_ParserCreate(encoding) orelse return null;
-            if (has_userdata) c.XML_SetUserData(p, user_data);
-            return .{ .raw = p };
-        }
-
-        pub fn initNs(encoding: ?[*:0]const u8, sep: u8, user_data: Ud) ?Self {
-            const p = c.XML_ParserCreateNS(encoding, sep) orelse return null;
-            if (has_userdata) c.XML_SetUserData(p, user_data);
-            return .{ .raw = p };
-        }
+        pub const initNs = if (has_userdata)
+            struct {
+                fn f(encoding: ?[*:0]const u8, sep: u8, user_data: Ud) ?Self {
+                    const p = c.XML_ParserCreateNS(encoding, sep) orelse return null;
+                    c.XML_SetUserData(p, user_data);
+                    return .{ .raw = p };
+                }
+            }.f
+        else
+            struct {
+                fn f(encoding: ?[*:0]const u8, sep: u8) ?Self {
+                    const p = c.XML_ParserCreateNS(encoding, sep) orelse return null;
+                    return .{ .raw = p };
+                }
+            }.f;
 
         pub fn deinit(self: *Self) void {
             c.XML_ParserFree(self.raw);
             self.raw = undefined;
         }
 
-        pub fn reset(self: *Self, encoding: ?[*:0]const u8, user_data: Ud) bool {
-            const ok = c.XML_ParserReset(self.raw, encoding) == c.XML_TRUE;
-            if (ok and has_userdata) c.XML_SetUserData(self.raw, user_data);
-            return ok;
-        }
+        pub const reset = if (has_userdata)
+            struct {
+                fn f(self: *Self, encoding: ?[*:0]const u8, user_data: Ud) bool {
+                    const ok = c.XML_ParserReset(self.raw, encoding) == c.XML_TRUE;
+                    if (ok) c.XML_SetUserData(self.raw, user_data);
+                    return ok;
+                }
+            }.f
+        else
+            struct {
+                fn f(self: *Self, encoding: ?[*:0]const u8) bool {
+                    return c.XML_ParserReset(self.raw, encoding) == c.XML_TRUE;
+                }
+            }.f;
 
         pub fn setElementHandler(self: *Self, comptime start: ?*const StartElementFn, comptime end: ?*const EndElementFn) void {
             c.XML_SetElementHandler(
@@ -268,6 +295,10 @@ pub fn Parser(comptime UserData: type) type {
             return @as([*]const u8, @ptrCast(ptr))[0..@intCast(len)];
         }
 
+        inline fn ud(raw_ud: ?*anyopaque) Ud {
+            return if (has_userdata) @ptrCast(@alignCast(raw_ud)) else {};
+        }
+
         const wrap = struct {
             fn startElement(comptime h: *const StartElementFn) c.XML_StartElementHandler {
                 return struct {
@@ -339,10 +370,8 @@ pub fn versionInfo() struct { major: c_int, minor: c_int, micro: c_int } {
 
 const testing = std.testing;
 
-const VoidParser = Parser(void);
-
 test "basic parsing" {
-    var p = VoidParser.init(null, {}) orelse return error.InitFailed;
+    var p = StatelessParser.init(null) orelse return error.InitFailed;
     defer p.deinit();
     try testing.expectEqual(.ok, p.parse("<root><child/></root>", true));
 }
@@ -402,7 +431,7 @@ test "default handler" {
 }
 
 test "buffer parsing" {
-    var p = VoidParser.init(null, {}) orelse return error.InitFailed;
+    var p = StatelessParser.init(null) orelse return error.InitFailed;
     defer p.deinit();
     const xml = "<r/>";
     const buf = p.getBuffer(xml.len) orelse return error.NoBuffer;
@@ -411,7 +440,7 @@ test "buffer parsing" {
 }
 
 test "parsing status" {
-    var p = VoidParser.init(null, {}) orelse return error.InitFailed;
+    var p = StatelessParser.init(null) orelse return error.InitFailed;
     defer p.deinit();
     try testing.expectEqual(Parsing.initialized, p.getParsingStatus().parsing);
     _ = p.parse("<r>", false);
@@ -421,11 +450,11 @@ test "parsing status" {
 }
 
 test "encoding" {
-    var p = VoidParser.init(null, {}) orelse return error.InitFailed;
+    var p = StatelessParser.init(null) orelse return error.InitFailed;
     defer p.deinit();
     try testing.expect(p.setEncoding("UTF-8"));
     _ = p.parse("<r/>", true);
-    try testing.expect(p.reset(null, {}));
+    try testing.expect(p.reset(null));
     try testing.expect(p.setEncoding("ISO-8859-1"));
 }
 
@@ -456,7 +485,7 @@ test "attribute iterator" {
 }
 
 test "error handling" {
-    var p = VoidParser.init(null, {}) orelse return error.InitFailed;
+    var p = StatelessParser.init(null) orelse return error.InitFailed;
     defer p.deinit();
     try testing.expectEqual(Status.failed, p.parse("<r><unclosed>", true));
     const err = p.getErrorCode();
